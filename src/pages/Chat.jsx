@@ -5,6 +5,7 @@ import socket from '../socket';
 import { useAuth } from '../context/AuthContext';
 import MessageList from '../components/MessageList';
 import MessageInput from '../components/MessageInput';
+import UserList from '../components/UserList';
 
 const ROOMS = ['general', 'tech', 'random'];
 
@@ -14,19 +15,36 @@ export default function Chat() {
 
   const [room, setRoom] = useState('general');
   const [messages, setMessages] = useState([]);
-//   const [onlineCount, setOnlineCount] = useState(0);
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!token) return;
+    const fetchMessages = async () => {
+        setLoading(true);
+        try {
+            const res = await axios.get(`http://localhost:5000/api/messages/${room}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setMessages(res.data);
+        } catch (err) {
+            console.error("Fetch error:", err);
+        } finally {
+            setLoading(false);
+        }
+    };
     socket.auth = { token };
     if (!socket.connected) socket.connect();
 
     socket.emit('joinRoom', { room });
 
-    axios.get(`http://localhost:5000/api/messages/${room}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    }).then(res => setMessages(res.data));
+    fetchMessages();
 
     // Listeners
+    socket.on('onlineUsers', (users) => {
+      setOnlineUsers(users);
+    });
+
     socket.on('receiveMessage', (msg) => {
       setMessages(prev => [...prev, msg]);
     });
@@ -40,11 +58,13 @@ export default function Chat() {
     });
 
     return () => {
+      socket.emit('leaveRoom', { room });
       socket.off('receiveMessage');
       socket.off('userJoined');
       socket.off('userLeft');
+      socket.off('onlineUsers');
     };
-  }, [room]);
+  }, [room, token]);
 
   const handleSend = (text) => {
     socket.emit('sendMessage', { text, room });
@@ -87,6 +107,8 @@ export default function Chat() {
           </div>
         </div>
 
+        <UserList users={onlineUsers} />
+
         <div className="p-4 border-t border-gray-800">
           <button
             onClick={handleLogout}
@@ -108,7 +130,20 @@ export default function Chat() {
           </p>
         </div>
 
-        <MessageList messages={messages} />
+        {loading
+        ? (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-gray-500 text-sm">Loading messages...</p>
+          </div>
+        )
+        : messages.length === 0
+        ? (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-gray-500 text-sm">No messages yet. Say hello! 👋</p>
+          </div>
+        )
+        : <MessageList messages={messages} />
+      }
 
         <MessageInput onSend={handleSend} />
       </div>
